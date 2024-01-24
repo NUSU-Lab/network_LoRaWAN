@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "path": "../../../../../Projects/ESP/tutorial"
+    },
+    {
+      "name": "LoRaTutorial",
+      "path": ".."
+    },
+    {
+      "name": "MQTT_Tutorial",
+      "path": "../../MQTT_Tutorial"
+    }
+  ],
+  "settings": {}
+}
