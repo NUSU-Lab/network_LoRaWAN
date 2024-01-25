@@ -104,7 +104,7 @@ void do_send(osjob_t *j)
   {
     // Prepare upstream data transmission at the next possible time.
     // int a = analogRead(A0);
-    int a = 22;
+    int a = analogRead(GPIO_NUM_34);
     // bit shifting and bit masking.
     mydata[0] = (a >> 8);
     mydata[1] = (a & 0xFF);
