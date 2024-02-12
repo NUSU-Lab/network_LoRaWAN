@@ -1,44 +1,35 @@
-/*******************************************************************************
- * Copyright (c) 2015 Thomas Telkamp and Matthijs Kooijman
- * Copyright (c) 2018 Terry Moore, MCCI
+/* Heltec Automation LoRaWAN communication example
  *
- * Permission is hereby granted, free of charge, to anyone
- * obtaining a copy of this document and accompanying files,
- * to do whatever they want with them without any restriction,
- * including, but not limited to, copying, modification and redistribution.
- * NO WARRANTY OF ANY KIND IS PROVIDED.
+ * Function:
+ * 1. Upload node data to the server using the standard LoRaWAN protocol.
+ * 2. The network access status of LoRaWAN is displayed on the screen.
  *
- * This example sends a valid LoRaWAN packet with payload "Hello,
- * world!", using frequency and encryption settings matching those of
- * the The Things Network. It's pre-configured for the Adafruit
- * Feather M0 LoRa.
+ * Description:
+ * 1. Communicate using LoRaWAN protocol.
  *
- * This uses OTAA (Over-the-air activation), where where a DevEUI and
- * application key is configured, which are used in an over-the-air
- * activation procedure where a DevAddr and session keys are
- * assigned/generated for use with all further communication.
+ * HelTec AutoMation, Chengdu, China
+ * 成都惠利特自动化科技有限公司
+ * www.heltec.org
  *
- * Note: LoRaWAN per sub-band duty-cycle limitation is enforced (1% in
- * g1, 0.1% in g2), but not the TTN fair usage policy (which is probably
- * violated by this sketch when left running for longer)!
+ * this project also realess in GitHub:
+ * https://github.com/Heltec-Aaron-Lee/WiFi_Kit_series
+ * */
 
- * To use this sketch, first register your application and device with
- * the things network, to set or generate an AppEUI, DevEUI and AppKey.
- * Multiple devices can use the same AppEUI, but each device has its own
- * DevEUI and AppKey.
- *
- * Do not forget to define the radio type correctly in
- * arduino-lmic/project_config/lmic_project_config.h or from your BOARDS.txt.
- *
- *******************************************************************************/
+#include "LoRaWan_APP.h"
+#define SENSOR 33
+/* OTAA para*/
+// uint8_t devEui[] = {0x51,0x21,0x00,0x00,0x01,0x0C,0x25,0x00};
+// uint8_t appEui[] = {0x01,0x00,0x01,0x00,0x00,0x0C,0x25,0x00};
+// uint8_t appKey[] = {0x13,0x3C,0xDF,0x4D,0xBD,0x24,0xEC,0xC4,0x93,0x4E,0xD7,0xED,0xDA,0x3B,0x5E,0x0E};
 
-#include <Arduino.h>
-#include <lmic.h>
-#include <hal/hal.h>
-#include <SPI.h>
-#include "secrets.h"
+uint8_t devEui[] = {0x00, 0x25, 0x0C, 0x01, 0x00, 0x00, 0x21, 0x51};
+uint8_t appEui[] = {0x00, 0x25, 0x0C, 0x00, 0x00, 0x01, 0x00, 0x01};
+uint8_t appKey[] = {0x13, 0x3C, 0xDF, 0x4D, 0xBD, 0x24, 0xEC, 0xC4, 0x93, 0x4E, 0xD7, 0xED, 0xDA, 0x3B, 0x5E, 0x0E};
 
-#define SENSOR 34
+/* ABP para*/
+uint8_t nwkSKey[] = {0x15, 0xb1, 0xd0, 0xef, 0xa4, 0x63, 0xdf, 0xbe, 0x3d, 0x11, 0x18, 0x1e, 0x1e, 0xc7, 0xda, 0x85};
+uint8_t appSKey[] = {0xd7, 0x2c, 0x78, 0x75, 0x8c, 0xdc, 0xca, 0xbf, 0x55, 0xee, 0x4a, 0x77, 0x8d, 0x16, 0xef, 0x67};
+uint32_t devAddr = (uint32_t)0x007e6ae1;
 
 long currentMillis = 0;
 long previousMillis = 0;
@@ -50,60 +41,50 @@ int flowRate;
 unsigned long flowMilliLitres;
 unsigned long totalMilliLitres;
 
-//
-// For normal use, we require that you edit the sketch to replace FILLMEIN
-// with values assigned by the TTN console. However, for regression tests,
-// we want to be able to compile these scripts. The regression tests define
-// COMPILE_REGRESSION_TEST, and in that case we define FILLMEIN to a non-
-// working but innocuous value.
-//
-#ifdef COMPILE_REGRESSION_TEST
-#define FILLMEIN 0
-#else
-#warning "You must replace the values marked FILLMEIN with real values from the TTN control panel!"
-#define FILLMEIN (#dont edit this, edit the lines that use FILLMEIN)
-#endif
+/*LoraWan channelsmask*/
+uint16_t userChannelsMask[6] = {0x00FF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
 
-// This EUI must be in little-endian format, so least-significant-byte
-// first. When copying an EUI from ttnctl output, this means to reverse
-// the bytes. For TTN issued EUIs the last bytes should be 0xD5, 0xB3,
-// 0x70.                               {0x00,0x25,0x0C,0x00,0x00,0x01,0x00,0x01}
-void os_getArtEui(u1_t *buf) { memcpy_P(buf, APPEUI, 8); }
+/*LoraWan region, select in arduino IDE tools*/
+LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
 
-// This should also be in little endian format, see above. {0x00,0x25,0x0C,0x01,0x00,0x00,0x21,0x12}
-void os_getDevEui(u1_t *buf) { memcpy_P(buf, DEVEUI, 8); }
+/*LoraWan Class, Class A and Class C are supported*/
+DeviceClass_t loraWanClass = CLASS_A;
 
-// This key should be in big endian format (or, since it is not really a
-// number but a block of memory, endianness does not really apply). In
-// practice, a key taken from the TTN console can be copied as-is.
-void os_getDevKey(u1_t *buf) { memcpy_P(buf, APPKEY, 16); }
+/*the application data transmission duty cycle.  value in [ms].*/
+uint32_t appTxDutyCycle = 15000;
 
-static uint8_t mydata[4];
-static osjob_t sendjob;
+/*OTAA or ABP*/
+bool overTheAirActivation = true;
 
-// Schedule TX every this many seconds (might become longer due to duty
-// cycle limitations).
-const unsigned TX_INTERVAL = 20;
+/*ADR enable*/
+bool loraWanAdr = true;
 
-// Pin mapping
-//
-// Adafruit BSPs are not consistent -- m0 express defs ARDUINO_SAMD_FEATHER_M0,
-// m0 defs ADAFRUIT_FEATHER_M0
-//
-const lmic_pinmap lmic_pins = {
-    .nss = 18,
-    .rxtx = LMIC_UNUSED_PIN,
-    .rst = 14,
-    .dio = {26, 34, 35},
-};
+/* Indicates if the node is sending confirmed or unconfirmed messages */
+bool isTxConfirmed = true;
 
-void printHex2(unsigned v)
-{
-  v &= 0xff;
-  if (v < 16)
-    Serial.print('0');
-  Serial.print(v, HEX);
-}
+/* Application port */
+uint8_t appPort = 2;
+/*!
+ * Number of trials to transmit the frame, if the LoRaMAC layer did not
+ * receive an acknowledgment. The MAC performs a datarate adaptation,
+ * according to the LoRaWAN Specification V1.0.2, chapter 18.4, according
+ * to the following table:
+ *
+ * Transmission nb | Data Rate
+ * ----------------|-----------
+ * 1 (first)       | DR
+ * 2               | DR
+ * 3               | max(DR-1,0)
+ * 4               | max(DR-1,0)
+ * 5               | max(DR-2,0)
+ * 6               | max(DR-2,0)
+ * 7               | max(DR-3,0)
+ * 8               | max(DR-3,0)
+ *
+ * Note, that if NbTrials is set to 1 or 2, the MAC will not decrease
+ * the datarate, in case the LoRaMAC layer did not receive an acknowledgment
+ */
+uint8_t confirmedNbTrials = 4;
 
 void IRAM_ATTR pulseCounter()
 {
@@ -145,185 +126,40 @@ int calculate_flowRate()
   }
 }
 
-void do_send(osjob_t *j)
+/* Prepares the payload of the frame */
+static void prepareTxFrame(uint8_t port)
 {
-  // Check if there is not a current TX/RX job running
-  if (LMIC.opmode & OP_TXRXPEND)
-  {
-    Serial.println(F("OP_TXRXPEND, not sending"));
-  }
-  else
-  {
-    // Prepare upstream data transmission at the next possible time.
-    // int a = analogRead(A0);
-    // bit shifting and bit masking.
-    int a = calculate_flowRate();
-    // int a = 123;
-    // Serial.println(a);
-    mydata[0] = (a >> 8);
-    mydata[1] = (a & 0xFF);
-    LMIC_setTxData2(1, mydata, sizeof(mydata) - 1, 0);
-    Serial.println(F("Packet queued"));
-  }
-  // Next TX is scheduled after TX_COMPLETE event.
+  /*appData size is LORAWAN_APP_DATA_MAX_SIZE which is defined in "commissioning.h".
+   *appDataSize max value is LORAWAN_APP_DATA_MAX_SIZE.
+   *if enabled AT, don't modify LORAWAN_APP_DATA_MAX_SIZE, it may cause system hanging or failure.
+   *if disabled AT, LORAWAN_APP_DATA_MAX_SIZE can be modified, the max value is reference to lorawan region and SF.
+   *for example, if use REGION_CN470,
+   *the max value for different DR can be found in MaxPayloadOfDatarateCN470 refer to DataratesCN470 and BandwidthsCN470 in "RegionCN470.h".
+   */
+  appDataSize = 4;
+  // appData[0] = 0x00;
+  // appData[1] = 0x01;
+  // appData[2] = 0x02;
+  // appData[3] = 0x03;
+  int a = calculate_flowRate();
+  appData[0] = (a >> 8);
+  appData[1] = (a & 0xFF);
 }
 
-void onEvent(ev_t ev)
-{
-  Serial.print("Hi");
-  Serial.print(os_getTime());
-  Serial.print(": ");
-  switch (ev)
-  {
-  case EV_SCAN_TIMEOUT:
-    Serial.println(F("EV_SCAN_TIMEOUT"));
-    break;
-  case EV_BEACON_FOUND:
-    Serial.println(F("EV_BEACON_FOUND"));
-    break;
-  case EV_BEACON_MISSED:
-    Serial.println(F("EV_BEACON_MISSED"));
-    break;
-  case EV_BEACON_TRACKED:
-    Serial.println(F("EV_BEACON_TRACKED"));
-    break;
-  case EV_JOINING:
-    Serial.println(F("EV_JOINING"));
-    break;
-  case EV_JOINED:
-    Serial.println(F("EV_JOINED"));
-    {
-      u4_t netid = 0;
-      devaddr_t devaddr = 0;
-      u1_t nwkKey[16];
-      u1_t artKey[16];
-      LMIC_getSessionKeys(&netid, &devaddr, nwkKey, artKey);
-      Serial.print("netid: ");
-      Serial.println(netid, DEC);
-      Serial.print("devaddr: ");
-      Serial.println(devaddr, HEX);
-      Serial.print("AppSKey: ");
-      for (size_t i = 0; i < sizeof(artKey); ++i)
-      {
-        if (i != 0)
-          Serial.print("-");
-        printHex2(artKey[i]);
-      }
-      Serial.println("");
-      Serial.print("NwkSKey: ");
-      for (size_t i = 0; i < sizeof(nwkKey); ++i)
-      {
-        if (i != 0)
-          Serial.print("-");
-        printHex2(nwkKey[i]);
-      }
-      Serial.println();
-    }
-    // Disable link check validation (automatically enabled
-    // during join, but because slow data rates change max TX
-    // size, we don't use it in this example.
-    LMIC_setLinkCheckMode(0);
-    break;
-  /*
-  || This event is defined but not used in the code. No
-  || point in wasting codespace on it.
-  ||
-  || case EV_RFU1:
-  ||     Serial.println(F("EV_RFU1"));
-  ||     break;
-  */
-  case EV_JOIN_FAILED:
-    Serial.println(F("EV_JOIN_FAILED"));
-    break;
-  case EV_REJOIN_FAILED:
-    Serial.println(F("EV_REJOIN_FAILED"));
-    break;
-    break;
-  case EV_TXCOMPLETE:
-    Serial.println(F("EV_TXCOMPLETE (includes waiting for RX windows)"));
-    if (LMIC.txrxFlags & TXRX_ACK)
-      Serial.println(F("Received ack"));
-    if (LMIC.dataLen)
-    {
-      Serial.println(F("Received "));
-      Serial.println(LMIC.dataLen);
-      Serial.println(F(" bytes of payload"));
-    }
-    // Schedule next transmission
-    os_setTimedCallback(&sendjob, os_getTime() + sec2osticks(TX_INTERVAL), do_send);
-    break;
-  case EV_LOST_TSYNC:
-    Serial.println(F("EV_LOST_TSYNC"));
-    break;
-  case EV_RESET:
-    Serial.println(F("EV_RESET"));
-    break;
-  case EV_RXCOMPLETE:
-    // data received in ping slot
-    Serial.println(F("EV_RXCOMPLETE"));
-    break;
-  case EV_LINK_DEAD:
-    Serial.println(F("EV_LINK_DEAD"));
-    break;
-  case EV_LINK_ALIVE:
-    Serial.println(F("EV_LINK_ALIVE"));
-    break;
-  /*
-  || This event is defined but not used in the code. No
-  || point in wasting codespace on it.
-  ||
-  || case EV_SCAN_FOUND:
-  ||    Serial.println(F("EV_SCAN_FOUND"));
-  ||    break;
-  */
-  case EV_TXSTART:
-    Serial.println(F("EV_TXSTART"));
-    break;
-  case EV_TXCANCELED:
-    Serial.println(F("EV_TXCANCELED"));
-    break;
-  case EV_RXSTART:
-    /* do not print anything -- it wrecks timing */
-    break;
-  case EV_JOIN_TXCOMPLETE:
-    Serial.println(F("EV_JOIN_TXCOMPLETE: no JoinAccept"));
-    break;
-
-  default:
-    Serial.print(F("Unknown event: "));
-    Serial.println((unsigned)ev);
-    break;
-  }
-}
+RTC_DATA_ATTR bool firstrun = true;
 
 void setup()
 {
-  SPI.begin(5, 19, 27, 18);
-
-  delay(5000);
-  // while (!Serial)
-  //   ;
-  Serial.begin(9600);
-  Serial.println(F("Starting"));
-
-#ifdef VCC_ENABLE
-  // For Pinoccio Scout boards
-  pinMode(VCC_ENABLE, OUTPUT);
-  digitalWrite(VCC_ENABLE, HIGH);
-  delay(1000);
-#endif
-
-  // LMIC init
-  os_init();
-  // Reset the MAC state. Session and pending data transfers will be discarded.
-  LMIC_reset();
-
-  LMIC_setLinkCheckMode(0);
-  LMIC_setDrTxpow(DR_SF7, 14);
-  LMIC_selectSubBand(1);
+  Serial.begin(115200);
+  Mcu.begin();
+  if (firstrun)
+  {
+    LoRaWAN.displayMcuInit();
+    firstrun = false;
+  }
+  deviceState = DEVICE_STATE_INIT;
 
   pinMode(SENSOR, INPUT_PULLUP);
-
   pulseCount = 0;
   flowRate = 0.0;
   flowMilliLitres = 0;
@@ -331,11 +167,52 @@ void setup()
   previousMillis = 0;
 
   attachInterrupt(digitalPinToInterrupt(SENSOR), pulseCounter, FALLING);
-  // Start job(sending automatically starts OTAA too)
-  do_send(&sendjob);
 }
 
 void loop()
 {
-  os_runloop_once();
+  switch (deviceState)
+  {
+  case DEVICE_STATE_INIT:
+  {
+#if (LORAWAN_DEVEUI_AUTO)
+    LoRaWAN.generateDeveuiByChipID();
+#endif
+    LoRaWAN.init(loraWanClass, loraWanRegion);
+    break;
+  }
+  case DEVICE_STATE_JOIN:
+  {
+    LoRaWAN.displayJoining();
+    LoRaWAN.join();
+    break;
+  }
+  case DEVICE_STATE_SEND:
+  {
+    LoRaWAN.displaySending();
+    prepareTxFrame(appPort);
+    LoRaWAN.send();
+    deviceState = DEVICE_STATE_CYCLE;
+    break;
+  }
+  case DEVICE_STATE_CYCLE:
+  {
+    // Schedule next packet transmission
+    txDutyCycleTime = appTxDutyCycle + randr(0, APP_TX_DUTYCYCLE_RND);
+    LoRaWAN.cycle(txDutyCycleTime);
+    deviceState = DEVICE_STATE_SLEEP;
+    break;
+  }
+  case DEVICE_STATE_SLEEP:
+  {
+    LoRaWAN.displayAck();
+    LoRaWAN.sleep(loraWanClass);
+    break;
+  }
+  default:
+  {
+    deviceState = DEVICE_STATE_INIT;
+    break;
+  }
+  }
 }
