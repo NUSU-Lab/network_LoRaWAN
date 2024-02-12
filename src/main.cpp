@@ -108,6 +108,8 @@ void printHex2(unsigned v)
 void IRAM_ATTR pulseCounter()
 {
   pulseCount++;
+  Serial.print("Pulse count: ");
+  Serial.println(pulseCount);
 }
 
 int calculate_flowRate()
